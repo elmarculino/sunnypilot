@@ -44,7 +44,10 @@ class VCruiseHelper(VCruiseHelperSP):
     return self.v_cruise_kph != V_CRUISE_UNSET
 
   def update_v_cruise(self, CS, enabled, is_metric):
-    self.v_cruise_kph_last = self.v_cruise_kph
+    # Never remember UNSET as "last set speed" — cancel/available-off would otherwise
+    # poison resume with 255 after one extra frame.
+    if self.v_cruise_kph != V_CRUISE_UNSET:
+      self.v_cruise_kph_last = self.v_cruise_kph
 
     self.get_minimum_set_speed(is_metric)
 
@@ -66,8 +69,12 @@ class VCruiseHelper(VCruiseHelperSP):
           self.v_cruise_kph = -1
           self.v_cruise_cluster_kph = -1
     else:
-      self.v_cruise_kph = V_CRUISE_UNSET
-      self.v_cruise_cluster_kph = V_CRUISE_UNSET
+      # pcmCruise: main switch off → clear. non-pcm (OP_CRUISE): cancel often pulses
+      # available off every disengage; wiping here publishes vCruise=255 and loses the
+      # previous set speed until initialize runs (and can stick if that edge is missed).
+      if self.CP.pcmCruise:
+        self.v_cruise_kph = V_CRUISE_UNSET
+        self.v_cruise_cluster_kph = V_CRUISE_UNSET
 
     if not self.CP.pcmCruise or not self.CP_SP.pcmCruiseSpeed:
       self.update_button_timers(CS, enabled)
@@ -145,10 +152,28 @@ class VCruiseHelper(VCruiseHelperSP):
 
     initial_experimental_mode = experimental_mode and not dynamic_experimental_control
     initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if initial_experimental_mode else V_CRUISE_INITIAL
+    # GWM MK4 (pcmCruise=False): stock openpilot floors set speed at 40 kph on engage, so a
+    # city engage at 15–25 kph still targets 40+ and accelerates hard on narrow streets.
+    # Use current speed, with a 20 kph floor only when crawling/stopped (not a 40 kph force).
+    if self.CP.brand == "gwm" and not initial_experimental_mode:
+      initial = 20
 
-    if any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents) and self.v_cruise_initialized:
+    def _from_vego() -> int:
+      return int(round(np.clip(CS.vEgo * CV.MS_TO_KPH, initial, V_CRUISE_MAX)))
+
+    resume = any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents)
+    last_ok = (
+      self.v_cruise_kph_last != V_CRUISE_UNSET
+      and V_CRUISE_MIN <= self.v_cruise_kph_last <= V_CRUISE_MAX
+    )
+    if resume and last_ok:
       self.v_cruise_kph = self.v_cruise_kph_last
     else:
-      self.v_cruise_kph = int(round(np.clip(CS.vEgo * CV.MS_TO_KPH, initial, V_CRUISE_MAX)))
+      self.v_cruise_kph = _from_vego()
+
+    # Hard guarantee: never leave engage with UNSET/255 (planner + cluster treat as uninit).
+    if (not self.v_cruise_initialized or self.v_cruise_kph > V_CRUISE_MAX
+        or self.v_cruise_kph < V_CRUISE_MIN):
+      self.v_cruise_kph = _from_vego()
 
     self.v_cruise_cluster_kph = self.v_cruise_kph

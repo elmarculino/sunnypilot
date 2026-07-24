@@ -4,7 +4,7 @@ import numpy as np
 
 from openpilot.common.parameterized import parameterized_class
 from openpilot.cereal import log
-from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_MIN, V_CRUISE_MAX, V_CRUISE_INITIAL, IMPERIAL_INCREMENT
+from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_MIN, V_CRUISE_MAX, V_CRUISE_INITIAL, V_CRUISE_UNSET, IMPERIAL_INCREMENT
 from openpilot.cereal import custom
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
@@ -55,9 +55,11 @@ class TestVCruiseHelper:
     self.reset_cruise_speed_state()
 
   def reset_cruise_speed_state(self):
-    # Two resets previous cruise speed
-    for _ in range(2):
-      self.v_cruise_helper.update_v_cruise(car.CarState(cruiseState={"available": False}), enabled=False, is_metric=False)
+    # non-pcmCruise preserves set speed across available=False (OP_CRUISE cancel),
+    # so hard-reset the helper state for tests that need a clean UNSET.
+    self.v_cruise_helper.v_cruise_kph = V_CRUISE_UNSET
+    self.v_cruise_helper.v_cruise_cluster_kph = V_CRUISE_UNSET
+    self.v_cruise_helper.v_cruise_kph_last = 0
 
   def enable(self, v_ego, experimental_mode, dynamic_experimental_control):
     # Simulates user pressing set with a current speed
