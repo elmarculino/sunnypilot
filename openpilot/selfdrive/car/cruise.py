@@ -152,10 +152,9 @@ class VCruiseHelper(VCruiseHelperSP):
 
     initial_experimental_mode = experimental_mode and not dynamic_experimental_control
     initial = V_CRUISE_INITIAL_EXPERIMENTAL_MODE if initial_experimental_mode else V_CRUISE_INITIAL
-    # GWM MK4 (pcmCruise=False): stock openpilot floors set speed at 40 kph on engage, so a
-    # city engage at 15–25 kph still targets 40+ and accelerates hard on narrow streets.
-    # Use current speed, with a 20 kph floor only when crawling/stopped (not a 40 kph force).
-    if self.CP.brand == "gwm" and not initial_experimental_mode:
+    # GWM MK4 (pcmCruise=False): always init set-speed from vEgo with a 20 kph floor.
+    # Stock floors 40 (chill) or 105 (experimental) — OP_CRUISE owns set-speed, neither is right.
+    if self.CP.brand == "gwm":
       initial = 20
 
     def _from_vego() -> int:
